@@ -1,11 +1,11 @@
 """
-LotusWygranus 3.0 PRO: Eurojackpot Hybrid Core
-==============================================
-Potężny silnik analityczny Data Science.
-Łączy dwie bazy danych (5/50 + 2/12), buduje macierze powiązań (Affinity Matrix),
-i wykorzystuje dynamiczne wagowanie w locie do tworzenia zoptymalizowanych kuponów.
+LotusWygranus 4.0 ULTIMATE: Eurojackpot AI & Markov Sequences
+=============================================================
+Profesjonalny system predykcyjny analizujący "szlaki" maszyny losującej
+od najstarszego do najnowszego losowania za pomocą Łańcuchów Markowa
+oraz twardej analizy powiązań krzyżowych.
 
-Autor: Principal Data Scientist
+Autor: Principal Data Scientist & Software Architect
 """
 
 from __future__ import annotations
@@ -20,13 +20,12 @@ from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 import pdfplumber
 
 # ---------------------------------------------------------------------------
-# KONFIGURACJA GŁÓWNA EUROJACKPOT
+# KONFIGURACJA EUROJACKPOT
 # ---------------------------------------------------------------------------
 
 MAIN_POOL_MIN, MAIN_POOL_MAX, MAIN_COUNT = 1, 50, 5
@@ -35,56 +34,65 @@ EXTRA_POOL_MIN, EXTRA_POOL_MAX, EXTRA_COUNT = 1, 12, 2
 MAIN_POOL = list(range(MAIN_POOL_MIN, MAIN_POOL_MAX + 1))
 EXTRA_POOL = list(range(EXTRA_POOL_MIN, EXTRA_POOL_MAX + 1))
 
-# Liczby > 50 uznajemy za numery losowań (Draw IDs) w parserze Eurojackpot
+# Próg dla Draw ID (żeby odsiać kule od numerów losowań Eurojackpot)
 ID_THRESHOLD = 50 
 
 # ---------------------------------------------------------------------------
-# STYLIZACJA I UI (Custom CSS)
+# STYLIZACJA INTERFEJSU
 # ---------------------------------------------------------------------------
 
-st.set_page_config(page_title="LotusWygranus 3.0 PRO", page_icon="🇪🇺", layout="wide")
+st.set_page_config(page_title="LotusWygranus 4.0", page_icon="🔮", layout="wide")
 
-def inject_pro_css():
+def inject_ultimate_css():
     st.markdown("""
         <style>
             :root {
-                --bg-main: #0B0E14; --bg-panel: #151A22; --border: #2A3241;
-                --text-main: #E2E8F0; --text-muted: #94A3B8;
-                --accent-gold: #F59E0B; --accent-red: #EF4444; --accent-blue: #3B82F6;
+                --bg-main: #0a0a0a; --bg-panel: #111111; --border: #333333;
+                --text-main: #f5f5f5; --text-muted: #888888;
+                --accent-gold: #D4AF37; --accent-crimson: #DC143C; --accent-neon: #00FFCC;
             }
-            .stApp { background-color: var(--bg-main); color: var(--text-main); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-            h1, h2, h3 { color: var(--text-main); font-weight: 700; }
-            .info-box {
-                background: rgba(59, 130, 246, 0.1); border-left: 4px solid var(--accent-blue);
-                padding: 15px; border-radius: 4px; margin-bottom: 20px; font-size: 0.95rem; line-height: 1.5;
+            .stApp { background-color: var(--bg-main); color: var(--text-main); font-family: 'Inter', sans-serif; }
+            h1, h2, h3 { color: var(--text-main); font-weight: 800; letter-spacing: -0.5px; }
+            
+            /* Boxy informacyjne */
+            .expert-box {
+                background: linear-gradient(145deg, rgba(212, 175, 55, 0.1), rgba(0,0,0,0));
+                border-left: 4px solid var(--accent-gold);
+                padding: 16px; border-radius: 4px; margin-bottom: 20px; font-size: 0.95rem; line-height: 1.6;
             }
-            .ball-row { display: flex; gap: 12px; flex-wrap: wrap; margin: 10px 0; align-items: center;}
+            .expert-title { font-weight: 800; color: var(--accent-gold); margin-bottom: 8px; font-size: 1.1rem; }
+            
+            /* Kule losujące */
+            .ball-container { display: flex; gap: 10px; flex-wrap: wrap; margin: 15px 0; align-items: center; }
             .ball {
-                width: 54px; height: 54px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
-                font-weight: 800; font-size: 1.15rem; color: #111;
-                box-shadow: 0 4px 10px rgba(0,0,0,0.5), inset 0 -4px 6px rgba(0,0,0,0.2);
+                width: 50px; height: 50px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+                font-weight: 800; font-size: 1.2rem; color: #000;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.6), inset 0 -4px 8px rgba(0,0,0,0.3);
+                border: 2px solid rgba(255,255,255,0.2);
             }
-            .ball-main { background: radial-gradient(circle at 30% 30%, #FDE68A 0%, var(--accent-gold) 60%, #B45309 100%); }
-            .ball-extra { background: radial-gradient(circle at 30% 30%, #FCA5A5 0%, var(--accent-red) 60%, #991B1B 100%); }
-            .plus-sign { font-size: 1.5rem; color: var(--text-muted); font-weight: bold; margin: 0 5px; }
+            .ball-main { background: radial-gradient(circle at 35% 35%, #fffde7 0%, var(--accent-gold) 50%, #8b6914 100%); }
+            .ball-extra { background: radial-gradient(circle at 35% 35%, #ffebee 0%, var(--accent-crimson) 50%, #8b0000 100%); }
+            .plus-sign { font-size: 1.8rem; color: var(--text-muted); font-weight: 900; margin: 0 10px; }
+            
+            /* Kupony */
             .ticket-card {
                 background: var(--bg-panel); border: 1px solid var(--border);
-                border-radius: 12px; padding: 20px; margin-bottom: 16px;
-                transition: transform 0.2s ease, border-color 0.2s ease;
+                border-radius: 8px; padding: 22px; margin-bottom: 15px;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+                transition: transform 0.2s, border-color 0.2s;
             }
-            .ticket-card:hover { transform: translateY(-3px); border-color: var(--accent-gold); }
-            .ticket-meta { color: var(--accent-gold); font-size: 0.85rem; text-transform: uppercase; font-weight: 700; letter-spacing: 1px; margin-bottom: 10px; }
-            .ticket-stats { color: var(--text-muted); font-size: 0.85rem; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+            .ticket-card:hover { transform: translateY(-2px); border-color: var(--accent-neon); }
+            .ticket-header { color: var(--accent-neon); font-size: 0.85rem; text-transform: uppercase; font-weight: 700; letter-spacing: 1.5px; margin-bottom: 12px; }
+            .ticket-footer { color: var(--text-muted); font-size: 0.85rem; margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border); }
         </style>
     """, unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# BARDZO PRECYZYJNY PARSER PDF (dla obu plików)
+# PRECYZYJNY PARSER PDF
 # ---------------------------------------------------------------------------
 
 @st.cache_data(show_spinner=False)
 def parse_pdf_core(file_path: str, count: int, p_min: int, p_max: int) -> Dict[int, Tuple[int, ...]]:
-    """Oparty na układzie współrzędnych parser eliminujący brud z plików PDF."""
     if not os.path.exists(file_path):
         return {}
         
@@ -97,37 +105,29 @@ def parse_pdf_core(file_path: str, count: int, p_min: int, p_max: int) -> Dict[i
             if not text: continue
             
             for line in text.splitlines():
-                # Usuwamy daty, żeby parser nie uznał rocznika (np. 2024) za numer losowania
+                # Czyszczenie dat
                 line = re.sub(r"\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b", " ", line)
                 ints = [int(t) for t in _INT_RE.findall(line)]
                 if not ints: continue
                 
-                draw_id = None
-                balls = []
-                
+                draw_id, balls = None, []
                 for val in ints:
-                    # Identyfikacja ID (Eurojackpot ID to zwykle liczby > 50 np. 954, 800)
-                    if val > ID_THRESHOLD and draw_id is None:
-                        draw_id = val
-                    elif p_min <= val <= p_max:
-                        balls.append(val)
+                    if val > ID_THRESHOLD and draw_id is None: draw_id = val
+                    elif p_min <= val <= p_max: balls.append(val)
                         
                 if draw_id is not None:
                     uniq_balls = tuple(sorted(set(balls)))
                     if len(uniq_balls) == count:
                         if draw_id not in records:
                             records[draw_id] = uniq_balls
-                            
     return records
 
-@st.cache_data(show_spinner="Inicjalizacja Rdzenia Analitycznego...")
+@st.cache_data(show_spinner="Synchronizacja Baz Danych (Łączenie strumieni)...")
 def load_and_sync_databases() -> pd.DataFrame:
-    """Synchronizuje bazę główną i dodatkową (INNER JOIN) po numerze losowania."""
     main_db = parse_pdf_core("5z50.PDF", MAIN_COUNT, MAIN_POOL_MIN, MAIN_POOL_MAX)
     extra_db = parse_pdf_core("2z12.PDF", EXTRA_COUNT, EXTRA_POOL_MIN, EXTRA_POOL_MAX)
     
-    # Przechwytujemy tylko te losowania, gdzie mamy PEŁNE dane (5 z 50 ORAZ 2 z 12)
-    common_ids = sorted(set(main_db.keys()) & set(extra_db.keys()), reverse=True)
+    common_ids = sorted(set(main_db.keys()) & set(extra_db.keys())) # Sortujemy rosnąco (najstarsze pierwsze)
     
     merged = []
     for did in common_ids:
@@ -139,270 +139,237 @@ def load_and_sync_databases() -> pd.DataFrame:
         
     df = pd.DataFrame(merged)
     if not df.empty:
+        # Twarde sortowanie chronologiczne od najstarszego
         df = df.sort_values("draw_id", ascending=True).reset_index(drop=True)
         df["order"] = np.arange(len(df))
     return df
 
 # ---------------------------------------------------------------------------
-# SILNIK DATA SCIENCE (Macierze i Statystyki)
+# SILNIK DATA SCIENCE (Szlak Markowa & Affinity Matrix)
 # ---------------------------------------------------------------------------
 
 @dataclass
-class DeepStats:
+class UltimateStats:
     frequency: pd.Series
     current_gaps: Dict[int, int]
     mean_gaps: Dict[int, float]
-    affinity_matrix: pd.DataFrame  # Nowość! Pełna macierz powiązań każda-z-każdą
+    affinity_matrix: pd.DataFrame     # Wystąpienia w TMY SAMYM losowaniu
+    transition_matrix: pd.DataFrame   # Przejścia z losowania T do T+1 (Szlak Markowa)
+    last_drawn: Tuple[int, ...]       # Ostatnio wylosowane kule
 
 @st.cache_data(show_spinner=False)
-def compute_deep_stats(df: pd.DataFrame, cols: List[str], pool: List[int]) -> DeepStats:
-    """Tworzy profesjonalne statystyki, w tym głęboką macierz powiązań (Affinity Matrix)."""
+def compute_ultimate_stats(df: pd.DataFrame, cols: List[str], pool: List[int]) -> UltimateStats:
     n_draws = len(df)
     matrix = df[cols].to_numpy()
     
-    freq_counter = Counter(matrix.flatten())
+    freq_counter = Counter()
     last_seen = {}
     appearances = defaultdict(list)
     
-    # Budowa macierzy powiązań (Affinity Matrix)
-    # Rozmiar N x N, gdzie komórka (X, Y) to liczba wspólnych losowań cyfr X i Y
-    aff_matrix = pd.DataFrame(0, index=pool, columns=pool, dtype=int)
+    aff_matrix = pd.DataFrame(0.0, index=pool, columns=pool, dtype=float)
+    trans_matrix = pd.DataFrame(0.0, index=pool, columns=pool, dtype=float)
     
-    for idx, row in enumerate(matrix):
+    # Przechodzimy po losowaniach od najstarszego do najnowszego
+    for i in range(n_draws):
+        row = matrix[i]
+        freq_counter.update(row)
+        
         for n in row:
-            appearances[n].append(idx)
-            last_seen[n] = idx
-        # Parowanie krzyżowe - cała historia każdej cyfry względem innej
+            appearances[n].append(i)
+            last_seen[n] = i
+            
+        # Budowa Affinity Matrix (Kto lubi kogo w tym samym losowaniu)
         for a, b in combinations(row, 2):
-            aff_matrix.at[a, b] += 1
-            aff_matrix.at[b, a] += 1
+            aff_matrix.at[a, b] += 1.0
+            aff_matrix.at[b, a] += 1.0
+            
+        # Budowa Transition Matrix (Szlak Markowa: co wypadło w losowaniu i+1 względem i)
+        if i < n_draws - 1:
+            next_row = matrix[i+1]
+            for current_ball in row:
+                for next_ball in next_row:
+                    trans_matrix.at[current_ball, next_ball] += 1.0
 
     freq_series = pd.Series({n: freq_counter.get(n, 0) for n in pool}).sort_index()
     
-    gaps = {}
-    mean_gaps = {}
+    gaps, mean_gaps = {}, {}
     for n in pool:
         apps = appearances.get(n, [])
         gaps[n] = (n_draws - 1 - last_seen[n]) if apps else n_draws
         mean_gaps[n] = float(np.mean(np.diff(apps))) if len(apps) > 1 else float(n_draws)
         
-    return DeepStats(freq_series, gaps, mean_gaps, aff_matrix)
+    last_drawn = tuple(matrix[-1]) if n_draws > 0 else tuple()
+        
+    return UltimateStats(freq_series, gaps, mean_gaps, aff_matrix, trans_matrix, last_drawn)
 
 # ---------------------------------------------------------------------------
-# HYBRYDOWY GENERATOR Z DYNAMICZNYMI WAGAMI (Wersja PRO)
+# GENERATOR Z LOKOMOTYWĄ MARKOWA
 # ---------------------------------------------------------------------------
 
-def calculate_base_weights(stats: DeepStats, pool: List[int], mode: str) -> np.ndarray:
-    """Kalkuluje startowy potencjał każdej kuli na podstawie wybranej metodyki."""
-    f = stats.frequency.reindex(pool).fillna(0).to_numpy(dtype=float)
+def _normalize(weights: np.ndarray) -> np.ndarray:
+    w = np.copy(weights)
+    w[w < 0] = 0.0
+    s = w.sum()
+    return w / s if s > 0 else np.ones_like(w) / len(w)
+
+def calculate_base_weights(stats: UltimateStats, pool: List[int], mode: str) -> np.ndarray:
+    f = stats.frequency.reindex(pool).fillna(0).to_numpy(dtype=float) + 1.0
     g = np.array([stats.current_gaps[n] for n in pool], dtype=float)
     mg = np.array([stats.mean_gaps[n] for n in pool], dtype=float)
     
-    # Wygładzanie (Laplace smoothing), żeby uniknąć dzielenia przez 0
-    f_smooth = f + 1.0 
     overdue_ratio = np.where(mg > 0, g / mg, 1.0)
     
     if mode == "hot":
-        # Faworyzuje najczęstsze liczby (Gorące)
-        w = f_smooth
+        w = f
     elif mode == "cold":
-        # Faworyzuje liczby przespane i rzadkie (Zimne)
-        w = (1.0 / f_smooth) * (overdue_ratio ** 2)
+        w = (1.0 / f) * (overdue_ratio ** 2)
     elif mode == "hybrid":
-        # Tryb Mix: Balansuje uśrednioną częstotliwość z ratio uśpienia
-        w = (f_smooth / f_smooth.max()) + (overdue_ratio / overdue_ratio.max())
+        w = (f / f.max()) + (overdue_ratio / overdue_ratio.max())
+    elif mode == "markov":
+        # Szlak Markowa: Sprawdzamy co wypadło ostatnio i sumujemy prawdopodobieństwa przejść
+        w = np.zeros(len(pool))
+        for last_ball in stats.last_drawn:
+            transitions = stats.transition_matrix.loc[last_ball].to_numpy()
+            w += transitions
+        w += 0.1 # Smoothing, żeby kule z zerowym przejściem miały ułamek szansy
     else:
         w = np.ones(len(pool))
         
-    # Normalizacja
-    return w / w.sum() if w.sum() > 0 else np.ones(len(pool)) / len(pool)
+    return _normalize(w)
 
-def generate_pro_ticket(
-    stats: DeepStats, pool: List[int], count: int, 
+def generate_ultimate_ticket(
+    stats: UltimateStats, pool: List[int], count: int, 
     mode: str, intensity: float, affinity_strength: float
 ) -> Tuple[int, ...]:
-    """
-    Kluczowy algorytm 3.0: 
-    1. Ustala wagi bazowe.
-    2. Losuje pierwszą kulę.
-    3. Analizuje całą historię wylosowanej kuli w Affinity Matrix.
-    4. Zwiększa wagi kulom, z którymi historycznie "lubi się" pierwsza kula (zależnie od affinity_strength).
-    5. Powtarza proces aż do pełnego kuponu.
-    """
-    base_w = calculate_base_weights(stats, pool, mode)
     
-    # Nakładamy intensywność (0.0 = czysty lotto-chaos, 1.0 = czysta statystyka)
+    base_w = calculate_base_weights(stats, pool, mode)
     uniform_w = np.ones(len(pool)) / len(pool)
-    current_w = (intensity * base_w) + ((1.0 - intensity) * uniform_w)
-    current_w /= current_w.sum()
+    
+    # Aplikacja intensywności (balans między czystą losowością a wagami modelu)
+    current_w = _normalize((intensity * base_w) + ((1.0 - intensity) * uniform_w))
     
     chosen = []
     available_mask = np.ones(len(pool), dtype=bool)
-    pool_arr = np.array(pool)
     
     for _ in range(count):
-        # 1. Losowanie kuli na bazie obecnych wag
-        probs = current_w * available_mask
-        probs /= probs.sum() # Renormalizacja po wykluczeniu zużytych kul
-        
+        probs = _normalize(current_w * available_mask)
         pick_idx = np.random.choice(len(pool), p=probs)
         pick_val = pool[pick_idx]
         chosen.append(pick_val)
         available_mask[pick_idx] = False
         
-        # 2. DYNAMICZNY AFFINITY BOOST (Analiza względem tej samej na podst. historii)
+        # Affinity Boost (Wpływ kul między sobą na tym samym kuponie)
         if affinity_strength > 0.0:
-            # Wyciągamy z macierzy, jak często 'pick_val' padało z pozostałymi kulami
-            historical_links = stats.affinity_matrix.loc[pick_val].to_numpy(dtype=float)
-            if historical_links.max() > 0:
-                # Normalizujemy powiązania do mnożnika (od 1.0 do 1.0 + affinity_strength)
-                boost_multiplier = 1.0 + (affinity_strength * (historical_links / historical_links.max()))
-                current_w = current_w * boost_multiplier
+            links = stats.affinity_matrix.loc[pick_val].to_numpy()
+            if links.max() > 0:
+                boost = 1.0 + (affinity_strength * (links / links.max()))
+                current_w = _normalize(current_w * boost)
     
     return tuple(sorted(chosen))
 
 # ---------------------------------------------------------------------------
-# TWORZENIE WYKRESÓW ZAAWANSOWANYCH
+# WYKRESY
 # ---------------------------------------------------------------------------
 
-_CHART_THEME = dict(
-    paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(family="Segoe UI", color="#E2E8F0"), margin=dict(l=20, r=20, t=40, b=20)
-)
+_CHART_THEME = dict(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(family="Inter", color="#f5f5f5"), margin=dict(l=10, r=10, t=40, b=10))
 
-def plot_affinity_heatmap(stats: DeepStats, title: str) -> go.Figure:
-    """Rysuje mapę ciepła (Heatmap) dla macierzy powiązań."""
-    matrix = stats.affinity_matrix
+def plot_transition_heatmap(stats: UltimateStats, title: str) -> go.Figure:
+    matrix = stats.transition_matrix
     fig = go.Figure(data=go.Heatmap(
         z=matrix.values, x=matrix.columns, y=matrix.index,
-        colorscale="Viridis", hoverongaps=False,
-        hovertemplate="Liczba %{y} oraz %{x}<br>Wspólnych losowań: %{z}<extra></extra>"
+        colorscale="Inferno", hoverongaps=False,
+        hovertemplate="Kula T: %{y} ➜ Kula T+1: %{x}<br>Powtórzeń szlaku: %{z}<extra></extra>"
     ))
-    fig.update_layout(title=title, xaxis_title="Liczba", yaxis_title="Liczba", **_CHART_THEME)
+    fig.update_layout(title=title, xaxis_title="Wylosowana zaraz PÓŹNIEJ (T+1)", yaxis_title="Wylosowana kula (T)", **_CHART_THEME)
     return fig
 
 # ---------------------------------------------------------------------------
-# APLIKACJA GŁÓWNA STREAMLIT
+# MAIN UI
 # ---------------------------------------------------------------------------
 
 def main():
-    inject_pro_css()
+    inject_ultimate_css()
     
     st.markdown("""
-        <div style="background: linear-gradient(90deg, #1E293B 0%, #0F172A 100%); padding: 30px; border-radius: 12px; border: 1px solid #334155; margin-bottom: 25px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
-            <h1 style="margin:0; font-size: 2.8rem; background: linear-gradient(90deg, #FDE68A, #F59E0B); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">🇪🇺 LotusWygranus 3.0 PRO</h1>
-            <p style="color: #94A3B8; font-size: 1.1rem; margin-top: 10px;">Zaawansowany hybrydowy model analizy danych dla Eurojackpot (5/50 + 2/12). 
-            System buduje dynamiczne macierze prawdopodobieństwa i analizuje relacje każdej cyfry względem całej dostępnej historii.</p>
+        <div style="background: #111; padding: 25px; border-radius: 6px; border: 1px solid #333; margin-bottom: 25px;">
+            <h1 style="margin:0; font-size: 2.5rem;"><span style="color: #00FFCC;">⬡</span> LotusWygranus 4.0 ULTIMATE</h1>
+            <p style="color: #888; font-size: 1.1rem; margin-top: 5px;">Rdzeń Analizy Wektorowej & Łańcuchy Markowa dla Eurojackpot.</p>
         </div>
     """, unsafe_allow_html=True)
 
-    # Inicjalizacja Danych
     df = load_and_sync_databases()
     if df.empty:
-        st.error("Brak plików z danymi! Upewnij się, że pliki '5z50.PDF' oraz '2z12.PDF' znajdują się w tym samym folderze co ten skrypt (np. na GitHub).")
+        st.error("Brak plików '5z50.PDF' i '2z12.PDF' w repozytorium GitHub.")
         st.stop()
         
-    main_stats = compute_deep_stats(df, ["m1","m2","m3","m4","m5"], MAIN_POOL)
-    extra_stats = compute_deep_stats(df, ["e1","e2"], EXTRA_POOL)
+    main_stats = compute_ultimate_stats(df, ["m1","m2","m3","m4","m5"], MAIN_POOL)
+    extra_stats = compute_ultimate_stats(df, ["e1","e2"], EXTRA_POOL)
 
-    # Pasek boczny z opcjami i rozbudowanymi poradnikami
     with st.sidebar:
-        st.markdown("### ⚙️ Parametry Silnika")
+        st.markdown("### 🎛️ PANEL KONTROLNY")
         
         st.markdown("""
-        <div class="info-box">
-            <b>Zrozumienie Strategii:</b><br><br>
-            🔥 <b>Hot (Gorące):</b> Algorytm tworzy zestawy na bazie liczb, które padają najczęściej w całym zakresie. Idealne do "ujeżdżania trendów".<br><br>
-            ❄️ <b>Cold (Zimne):</b> Algorytm wyszukuje liczby, które "śpią" znacznie dłużej niż wynosi ich średnia historyczna.<br><br>
-            ⚖️ <b>Hybrid Mix (Mieszane):</b> Profesjonalny balans. Maszyna wybiera najsilniejsze liczby ze skrajnych biegunów (trochę pewniaków, trochę zimnych strzałów).
+        <div class="expert-box">
+            <div class="expert-title">Tryb "Szlak Markowa" (NOWOŚĆ)</div>
+            Wykorzystuje pamięć fizyczną maszyny losującej. Algorytm sprawdza, jakie kule wypadły w <b>ostatnim losowaniu w pliku PDF</b> i oblicza, co matematycznie najczęściej pada po nich jako "skok" maszyny. Wzorowanie się na śladach od najstarszego do najnowszego.
         </div>
         """, unsafe_allow_html=True)
         
-        mode = st.radio("Wybierz tryb pracy (Strategia):", ["hybrid", "hot", "cold"], 
-                        format_func=lambda m: {"hot": "🔥 Hot (Gorące)", "cold": "❄️ Cold (Zimne)", "hybrid": "⚖️ Hybrid Mix (Hybrydowe)"}[m])
+        mode = st.radio("Metodyka wyboru wag:", ["markov", "hybrid", "hot", "cold"], 
+                        format_func=lambda m: {
+                            "markov": "⬡ Szlak Markowa (Skoki Maszyny)", 
+                            "hot": "🔥 Gorące (Trendy)", 
+                            "cold": "❄️ Zimne (Na przełamanie)", 
+                            "hybrid": "⚖️ Hybryda (Balans)"
+                        }[m])
         
-        st.markdown("""
-        <div class="info-box">
-            <b>Intensywność Statystyczna:</b><br>
-            Określa, na ile ufasz statystyce. <br><code>0.0</code> to zwykły ślepy los (jak w maszynie Lotto), a <code>1.0</code> to absolutne dyktando twardych danych i wag. Zalecane: <b>0.7 - 0.8</b>.
-        </div>
-        """, unsafe_allow_html=True)
-        intensity = st.slider("Intensywność Statystyczna", 0.0, 1.0, 0.75, 0.05)
-        
-        st.markdown("""
-        <div class="info-box">
-            <b>Siła Analizy Historycznej (Affinity):</b><br>
-            Właśnie tu dzieje się magia <i>"każdej cyfry względem innej"</i>. Kiedy algorytm wylosuje pierwszą kulę (np. 14), analizuje całą historię PDF, by sprawdzić co najczęściej pada z czternastką, i podbija tym liczbom szanse.<br>Zalecane: <b>0.4 - 0.6</b>.
-        </div>
-        """, unsafe_allow_html=True)
-        affinity = st.slider("Siła Powiązań (Affinity Matrix)", 0.0, 1.0, 0.50, 0.05)
-        
-        n_tickets = st.number_input("Ile zestawów wygenerować?", 1, 50, 5)
-        generate_btn = st.button("🚀 INICJUJ GENERATOR", use_container_width=True)
+        intensity = st.slider("Intensywność Ufności (Wagi algorytmu)", 0.0, 1.0, 0.80, 0.05, help="1.0 = Ślepe podążanie za statystyką (ryzyko powtarzalności). 0.0 = Lotto na ślepo. Zalecane: 0.7-0.8")
+        affinity = st.slider("Siła Powiązań (Pary na kuponie)", 0.0, 1.0, 0.50, 0.05, help="Dobiera na jednym kuponie kule, które historycznie mocno ze sobą współpracują.")
+        n_tickets = st.number_input("Generowane zakłady", 1, 50, 6)
+        generate_btn = st.button("🚀 INICJALIZACJA PREDYKCJI", use_container_width=True)
 
-    # Główne zakładki
-    tab_sim, tab_matrix, tab_stats, tab_db = st.tabs([
-        "🎲 Moduł Generatora", "🕸️ Macierz Powiązań (Affinity)", "📊 Głębokie Statystyki", "📁 Zsynchronizowana Baza"
-    ])
+    tab_sim, tab_markov, tab_stats = st.tabs(["🔮 Predykcje", "⬡ Mapy Przejść (Markow)", "📊 Statystyki bazy"])
 
     with tab_sim:
-        st.markdown(f"### 🛡️ Zsynchronizowano **{len(df)}** historycznych losowań Eurojackpot.")
+        st.write(f"Zsynchronizowano **{len(df)}** losowań Eurojackpot. Ostatnie zanotowane losowanie [ID: {df.iloc[-1]['draw_id']}]")
+        
+        if mode == "markov":
+            st.markdown(f"**Analizuję skoki maszyny bazując na ostatnim losowaniu:**")
+            st.markdown(f"Kule Główne: `{main_stats.last_drawn}` | Euro: `{extra_stats.last_drawn}`")
         
         if generate_btn or "tickets" not in st.session_state:
-            with st.spinner("Przeliczanie bilionów kombinacji w macierzy..."):
+            with st.spinner("Kompilacja wag, analiza wektorowa przejść..."):
                 tickets = []
                 for _ in range(n_tickets):
-                    # Generowanie 5 z 50
-                    m_draw = generate_pro_ticket(main_stats, MAIN_POOL, MAIN_COUNT, mode, intensity, affinity)
-                    # Generowanie 2 z 12
-                    e_draw = generate_pro_ticket(extra_stats, EXTRA_POOL, EXTRA_COUNT, mode, intensity, affinity)
+                    m_draw = generate_ultimate_ticket(main_stats, MAIN_POOL, MAIN_COUNT, mode, intensity, affinity)
+                    e_draw = generate_ultimate_ticket(extra_stats, EXTRA_POOL, EXTRA_COUNT, mode, intensity, affinity)
                     tickets.append((m_draw, e_draw))
                 st.session_state["tickets"] = tickets
                 st.session_state["mode"] = mode
 
-        # Renderowanie kuponów
         for i, (m_draw, e_draw) in enumerate(st.session_state["tickets"], start=1):
-            # Obliczenia metadanych dla kuponu (żeby pokazać, że to działa profesjonalnie)
-            m_sum = sum(m_draw)
-            m_odd = sum(1 for x in m_draw if x % 2 != 0)
-            avg_freq = np.mean([main_stats.frequency[x] for x in m_draw])
-            
             html = f"""
             <div class="ticket-card">
-                <div class="ticket-meta">Zestaw #{i} &bull; Tryb: {st.session_state['mode'].upper()}</div>
-                <div class="ball-row">
+                <div class="ticket-header">Zakład #{i} &bull; Profil: {st.session_state['mode'].upper()}</div>
+                <div class="ball-container">
             """
             for num in m_draw: html += f'<div class="ball ball-main">{num}</div>'
             html += '<div class="plus-sign">+</div>'
             for num in e_draw: html += f'<div class="ball ball-extra">{num}</div>'
             html += f"""
                 </div>
-                <div class="ticket-stats">
-                    <b>Analityka kuponu:</b> Suma kul głównych: {m_sum} | Nieparzyste/Parzyste: {m_odd}/{MAIN_COUNT - m_odd} | Średnia częstotliwość historyczna: {avg_freq:.1f}
-                </div>
+                <div class="ticket-footer">Algorytm wziął pod uwagę siłę przejść między najstarszym a najnowszym losowaniem.</div>
             </div>
             """
             st.markdown(html, unsafe_allow_html=True)
 
-    with tab_matrix:
-        st.markdown("### 🕸️ Mapa Ciepła Powiązań (Kule Główne)")
-        st.write("Czym jaśniejszy kolor, tym częściej dwie liczby pojawiały się razem na jednym kuponie w całej historii Eurojackpot. Algorytm w czasie rzeczywistym używa tej siatki do parowania Twoich zestawów.")
-        st.plotly_chart(plot_affinity_heatmap(main_stats, "Affinity Matrix (5 z 50)"), use_container_width=True)
+    with tab_markov:
+        st.markdown("### ⬡ Szlaki Maszyny: Macierz Przejść (Transition Matrix)")
+        st.write("Wykres pokazuje historię przejść. Oś Y to kula z losowania nr *N*. Oś X to kula z losowania *N+1* (następnego).")
+        st.plotly_chart(plot_transition_heatmap(main_stats, "Przejścia Łańcucha Markowa - Kule Główne"), use_container_width=True)
 
     with tab_stats:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("#### 🔥 Najgorętsze Kule Główne")
-            st.dataframe(main_stats.frequency.sort_values(ascending=False).head(10).reset_index().rename(columns={"index": "Kula", 0: "Liczba Wystąpień"}), use_container_width=True)
-        with col2:
-            st.markdown("#### ❄️ Najbardziej 'Uśpione' (Zimne)")
-            gaps_df = pd.Series(main_stats.current_gaps).sort_values(ascending=False).head(10).reset_index().rename(columns={"index": "Kula", 0: "Zaległych losowań"})
-            st.dataframe(gaps_df, use_container_width=True)
-
-    with tab_db:
-        st.markdown("### 📁 Sparowana Baza Danych z PDF")
-        st.write("Aplikacja pomyślnie złączyła dane z plików 5z50.pdf oraz 2z12.pdf w jedną zsynchronizowaną tabelę czasową.")
-        # Wizualizacja tabeli (newest first)
+        st.markdown("### Surowa baza odczytana z plików PDF")
         st.dataframe(df.sort_values("draw_id", ascending=False).drop(columns=["order"]), use_container_width=True, hide_index=True)
 
 if __name__ == "__main__":
